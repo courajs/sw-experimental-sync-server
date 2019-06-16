@@ -12,7 +12,8 @@ var db = new sqlite3.Database(dbFile);
 
 db.serialize(function(){
   if (!exists) {
-    db.run('CREATE TABLE atoms (server_index integer primary key, client text, client_index integer, value text)');
+      db.run('CREATE TABLE atoms (server_index integer primary key, client text, client_index integer, value text)');
+      db.run('CREATE UNIQUE INDEX unique_atoms on atoms(client, client_index)');
   }
 });
 
@@ -41,20 +42,24 @@ io.on('connection', function(socket){
     db.all('SELECT server_index, client, client_index, value from atoms where client != ? and server_index >= ?', socket.client_id, next, function(err, data) {
       if (err) { throw err; }
       console.log('data', data[0]);
+      data.forEach(d => d.value = JSON.parse(d.value));
       socket.emit('tell', data.concat(socket.buffer));
       socket.state = 'live';
       socket.buffer = [];
     });
   });
 
-  socket.on('tell', function(data) {
+  socket.on('tell', function(data, ack) {
     db.serialize(function() {
+      if (data.length === 0) { return; }
+      console.log(data);
       let records = data.slice();
       while (records.length > 333) {
         let these = records.splice(0,333);
-        db.run('INSERT into atoms (client, client_index, values) VALUES ' + new Array(333).fill('(?,?,?)').join(','), insertValuesForData(these, socket.client_id));
+        db.run('INSERT OR IGNORE into atoms (client, client_index, values) VALUES ' + new Array(333).fill('(?,?,?)').join(','), insertValuesForData(these, socket.client_id));
       }
-      db.run('INSERT into atoms (client, client_index, value) VALUES ' + new Array(records.length).fill('(?,?,?)').join(','), insertValuesForData(records, socket.client_id), function(err) {
+      db.run('INSERT OR IGNORE into atoms (client, client_index, value) VALUES ' + new Array(records.length).fill('(?,?,?)').join(','), insertValuesForData(records, socket.client_id), function(err) {
+        ack();
         if (err) { throw err; }
         let first = this.lastId - data.length + 1;
         data.forEach(function(rec, i) {
