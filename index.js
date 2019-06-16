@@ -6,7 +6,7 @@ var app = require('express')();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 
-var dbFile = './.data/sqlite.db';
+var dbFile = './data/sqlite.db';
 var exists = fs.existsSync(dbFile);
 var db = new sqlite3.Database(dbFile);
 
@@ -37,8 +37,8 @@ io.on('connection', function(socket){
     socket.client_id = id;
   });
 
-  socket.on('ask', function(since) {
-    db.all('SELECT server_index, client, client_index, value from atoms where client != ? and server_index > ?', socket.client_id, since, function(err, data) {
+  socket.on('ask', function(next) {
+    db.all('SELECT server_index, client, client_index, value from atoms where client != ? and server_index >= ?', socket.client_id, next, function(err, data) {
       if (err) { throw err; }
       console.log('data', data[0]);
       socket.emit('tell', data.concat(socket.buffer));
