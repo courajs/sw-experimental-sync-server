@@ -66,10 +66,11 @@ io.on('connection', function(socket){
         if (err) { throw err; }
         ack();
         results.forEach(d => d.value = JSON.parse(d.value));
+        console.log('persisted, ready for broadcast', results);
         for (let s of Object.values(io.sockets.connected)) {
           console.log('considered',s.client_id,'for broadcast');
           if (s === socket) {
-            return;
+            continue;
           }
           if (s.state === 'updating') {
             console.log('buffering', s.client_id, results);
