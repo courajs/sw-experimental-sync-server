@@ -33,15 +33,16 @@ io.on('connection', function(socket){
   socket.state = 'updating';
   socket.buffer = [];
 
-  socket.on('auth', function(id) {
+  socket.on('auth', function(id, ack) {
     console.log('authing', id);
     socket.client_id = id;
+    ack();
   });
 
   socket.on('ask', function(next) {
     db.all('SELECT server_index, client, client_index, value from atoms where client != ? and server_index >= ?', socket.client_id, next, function(err, data) {
       if (err) { throw err; }
-      console.log('data', data[0]);
+      console.log(`asked about messages since/including ${next}, found ${data.length}`);
       data.forEach(d => d.value = JSON.parse(d.value));
       socket.emit('tell', data.concat(socket.buffer));
       socket.state = 'live';
@@ -52,28 +53,30 @@ io.on('connection', function(socket){
   socket.on('tell', function(data, ack) {
     db.serialize(function() {
       if (data.length === 0) { return; }
-      console.log(data);
+      console.log('heard tell', data);
       let records = data.slice();
       while (records.length > 333) {
         let these = records.splice(0,333);
-        db.run('INSERT OR IGNORE into atoms (client, client_index, values) VALUES ' + new Array(333).fill('(?,?,?)').join(','), insertValuesForData(these, socket.client_id));
+        db.run('INSERT OR IGNORE into atoms (client, client_index, value) VALUES ' + new Array(333).fill('(?,?,?)').join(','), insertValuesForData(these, socket.client_id));
       }
-      db.run('INSERT OR IGNORE into atoms (client, client_index, value) VALUES ' + new Array(records.length).fill('(?,?,?)').join(','), insertValuesForData(records, socket.client_id), function(err) {
-        ack();
+      db.run('INSERT OR IGNORE into atoms (client, client_index, value) VALUES ' + new Array(records.length).fill('(?,?,?)').join(','), insertValuesForData(records, socket.client_id));
+      let min_id = data.reduce((a,d)=>Math.min(a, d.client_index), data[0].client_index);
+      console.log('min id from data', min_id);
+      db.all('SELECT server_index, client, client_index, value FROM atoms WHERE client = ? AND client_index >= ?', socket.client_id, min_id, function(err, results) {
         if (err) { throw err; }
-        let first = this.lastId - data.length + 1;
-        data.forEach(function(rec, i) {
-          rec.client = socket.client_id;
-          rec.server_index = first + i;
-        });
+        ack();
+        results.forEach(d => d.value = JSON.parse(d.value));
         for (let s of Object.values(io.sockets.connected)) {
+          console.log('considered',s.client_id,'for broadcast');
           if (s === socket) {
             return;
           }
           if (s.state === 'updating') {
-            s.buffer = s.buffer.push(...data);
+            console.log('buffering', s.client_id, results);
+            s.buffer = s.buffer.push(...results);
           } else if (s.state === 'live') {
-            s.emit('tell', data);
+            console.log('telling', s.client_id, results);
+            s.emit('tell', results);
           }
         }
       });
