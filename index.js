@@ -2,9 +2,11 @@ var fs = require('fs');
 
 var sqlite3 = require('sqlite3').verbose();
 
-var app = require('express')();
+var express = require('express');
+var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
+var cookie = require('cookie');
 
 var dbFile = './data/sqlite.db';
 var exists = fs.existsSync(dbFile);
@@ -17,8 +19,16 @@ db.serialize(function(){
   }
 });
 
-app.get('/', function(req, res){
-  res.send('hello');
+app.use(require('cookie-parser')());
+app.use(require('body-parser').text());
+app.post('/auth', function(req, res){
+  if (!req.body) {
+    console.log('no body in auth request!');
+    res.status(400).send('send your id!!');
+    return;
+  }
+  res.cookie('live_id', req.body, { maxAge: 90000000, httpOnly: false });
+  res.send('ok');
 });
 
 function insertValuesForData(these, client_id) {
@@ -30,23 +40,18 @@ function insertValuesForData(these, client_id) {
 }
 
 io.on('connection', function(socket){
-  socket.state = 'updating';
-  socket.buffer = [];
-
-  socket.on('auth', function(id, ack) {
-    console.log('authing', id);
-    socket.client_id = id;
-    ack();
-  });
+  if (!socket.request.headers.cookie) {
+    console.log('no cookie!!!');
+  } else {
+    socket.client_id = cookie.parse(socket.request.headers.cookie).live_id;
+  }
 
   socket.on('ask', function(next) {
     db.all('SELECT server_index, client, client_index, value from atoms where client != ? and server_index >= ?', socket.client_id, next, function(err, data) {
       if (err) { throw err; }
       console.log(`asked about messages since/including ${next}, found ${data.length}`);
       data.forEach(d => d.value = JSON.parse(d.value));
-      socket.emit('tell', data.concat(socket.buffer));
-      socket.state = 'live';
-      socket.buffer = [];
+      socket.emit('tell', data);
     });
   });
 
@@ -72,18 +77,17 @@ io.on('connection', function(socket){
           if (s === socket) {
             continue;
           }
-          if (s.state === 'updating') {
-            console.log('buffering', s.client_id, results);
-            s.buffer = s.buffer.push(...results);
-          } else if (s.state === 'live') {
-            console.log('telling', s.client_id, results);
-            s.emit('tell', results);
-          }
+          console.log('telling', s.client_id, results);
+          s.emit('tell', results);
         }
       });
     });
   });
 });
+
+setInterval(function() {
+  console.log('connected clients', Object.values(io.sockets.connected).map(s => s.client_id));
+}, 10000);
 
 http.listen(3001, function(){
   console.log('listening on *:3001');
