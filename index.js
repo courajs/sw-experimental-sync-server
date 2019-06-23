@@ -44,6 +44,7 @@ io.on('connection', function(socket){
     console.log('no cookie!!!');
   } else {
     socket.client_id = cookie.parse(socket.request.headers.cookie).live_id;
+    console.log('authed', socket.client_id);
   }
 
   socket.on('ask', function(next) {
@@ -85,9 +86,11 @@ io.on('connection', function(socket){
   });
 });
 
+/*
 setInterval(function() {
   console.log('connected clients', Object.values(io.sockets.connected).map(s => s.client_id));
 }, 10000);
+*/
 
 http.listen(3001, function(){
   console.log('listening on *:3001');
